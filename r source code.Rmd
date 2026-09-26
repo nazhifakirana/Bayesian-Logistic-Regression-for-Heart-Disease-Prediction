@@ -1,0 +1,323 @@
+---
+title: "Bayesian Logistic Regression Analysis of Heart Disease"
+author: ""
+date: ""
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+Group Member:
+
+- Samuel Christopher ~ 2802545466
+- Michael Yeremia ~ 2802504876
+- Nazhifa Kirana Mulia Nugraha ~ 2802545655
+- Valentino Kurniawan ~ 2802524120
+
+## 1. Introduction
+
+This project applies Bayesian Logistic Regression to model a binary outcome variable using Bayesian inference. The objective is to estimate the posterior distribution of regression parameters, evaluate model performance using Bayesian model evaluation criteria, and interpret the results probabilistically.
+
+The analysis is conducted using R with the JAGS engine for Markov Chain Monte Carlo (MCMC) sampling.
+
+## 2. Model Specification
+
+### 2.1 Likelihood Function
+
+The likelihood is modeled using a Bernoulli distribution:
+
+\[
+y_i \sim \text{Bernoulli}(\pi_i)
+\]
+
+The success probability \( \pi_i \) is linked to the predictors through the logistic (logit) function:
+
+\[
+\text{logit}(\pi_i) = \log\left(\frac{\pi_i}{1-\pi_i}\right)
+= \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + \beta_3 x_{3i}
+\]
+
+
+### 2.2 Prior Distributions
+
+Weakly informative normal priors are assigned to the regression coefficients:
+
+\[
+\beta_0 \sim \mathcal{N}(0, 1)
+\]
+
+\[
+\beta_1 \sim \mathcal{N}(0, 1)
+\]
+
+\[
+\beta_2 \sim \mathcal{N}(0, 1)
+\]
+
+\[
+\beta_3 \sim \mathcal{N}(0, 1)
+\]
+
+These priors regularize the estimates while allowing sufficient flexibility.
+
+### 2.3 Posterior Distribution
+
+Using Bayes’ theorem, the posterior distribution of the parameters is given by:
+
+\[
+p(\boldsymbol{\beta} \mid \mathbf{y}) \propto
+p(\mathbf{y} \mid \boldsymbol{\beta}) \, p(\boldsymbol{\beta})
+\]
+
+The likelihood function can be written as:
+
+\[
+p(\mathbf{y} \mid \boldsymbol{\beta})
+= \prod_{i=1}^{n} \pi_i^{y_i} (1-\pi_i)^{1-y_i}
+\]
+
+Because the posterior distribution does not have a closed-form solution, inference is performed using Markov Chain Monte Carlo (MCMC) sampling.
+
+## 3. Bayesian Estimation Using JAGS
+
+Bayesian parameter estimation was performed using the JAGS (Just Another Gibbs Sampler)
+engine through Markov Chain Monte Carlo (MCMC) simulation. Two parallel chains were run
+to assess convergence. Running multiple MCMC chains from different initial values allows for more reliable
+assessment of convergence. If all chains converge to the same posterior distribution,
+this provides stronger evidence that the sampler has adequately explored the parameter
+space. An initial burn-in period of 1,000 iterations was used to allow
+the chains to reach the stationary distribution, followed by 2,000 iterations for
+posterior inference.
+
+
+```{r}
+library(rjags)
+library(coda)
+library(caret)
+
+heart <- read.csv("heart.csv")
+
+y <- heart$target
+
+x1 <- as.numeric(scale(heart$age))
+x2 <- as.numeric(scale(heart$chol))
+x3 <- as.numeric(scale(heart$thalach))
+
+n <- length(y)
+
+data <- list(
+  y = y,
+  x1 = x1,
+  x2 = x2,
+  x3 = x3,
+  n = n
+)
+
+model_string <- "model{
+  for(i in 1:n){
+    y[i] ~ dbern(pi[i])
+    logit(pi[i]) <- beta0 + beta1*x1[i] + beta2*x2[i] + beta3*x3[i]
+    like[i] <- dbin(y[i], pi[i], 1)
+  }
+  beta0 ~ dnorm(0,1)
+  beta1 ~ dnorm(0,1)
+  beta2 ~ dnorm(0,1)
+  beta3 ~ dnorm(0,1)
+}"
+
+model_jags <- jags.model(
+  textConnection(model_string),
+  data = data,
+  n.chains = 2
+)
+
+update(model_jags, 1000)
+
+samples <- coda.samples(
+  model_jags,
+  variable.names = c("beta0","beta1","beta2","beta3"),
+  n.iter = 2000
+)
+```
+
+## 4. Model Diagnostics
+
+### 4.1 Trace Plots
+
+Trace plots display sampled parameter values across iterations and are used to evaluate
+convergence and mixing of the MCMC chains. Well-mixed traces that fluctuate around a
+stable mean without visible trends indicate that the chains have converged to the target
+posterior distribution.
+
+```{r}
+plot(samples[, "beta0"])
+title("Trace and Density Plot of beta0 (Intercept)")
+
+plot(samples[, "beta1"])
+title("Trace and Density Plot of beta1 (Age)")
+
+plot(samples[, "beta2"])
+title("Trace and Density Plot of beta2 (Cholesterol)")
+
+plot(samples[, "beta3"])
+title("Trace and Density Plot of beta3 (Maximum Heart Rate)")
+```
+
+### 4.2 Convergence Diagnostics
+
+- Geweke Diagnostic
+
+```{r}
+geweke.diag(samples)
+```
+
+The Geweke diagnostic compares the means of the early and late segments of each chain;
+values within ±1.96 indicate convergence.
+
+- Gelman–Rubin Statistic (R-hat)
+
+```{r}
+gelman.diag(samples)
+```
+
+The Gelman–Rubin statistic (R-hat) compares
+between-chain and within-chain variability, with values close to 1 indicating
+convergence.
+
+- Effective Sample Size (ESS)
+
+```{r}
+effectiveSize(samples)
+```
+Effective Sample Size (ESS) measures the amount of independent information
+contained in the MCMC samples, where larger values indicate more reliable estimates.
+
+## 5. Model Evaluation
+
+Model evaluation was performed using Bayesian model fit criteria and predictive
+assessment techniques. Information criteria were used to assess out-of-sample predictive
+performance, while posterior predictive checks were used to evaluate model adequacy.
+
+### 5.1 Deviance Information Criterion (DIC)
+```{r}
+dic.samples(model_jags, n.iter=2000)
+```
+
+The Deviance Information Criterion (DIC) is a Bayesian model comparison metric that
+balances model fit and complexity. Lower DIC values indicate a better trade-off between
+goodness of fit and model complexity.
+
+### 5.2 Watanabe–Akaike Information Criterion (WAIC)
+```{r}
+samples_like <- coda.samples(model_jags, "like", n.iter=2000)
+likelihood <- do.call(rbind, samples_like)
+fbar <- colMeans(likelihood)
+Pw <- sum(apply(log(likelihood), 2, var))
+WAIC <- -2 * sum(log(fbar)) + 2 * Pw
+WAIC
+```
+
+In the WAIC computation, the term f̄ represents the average likelihood across posterior
+samples, while Pw corresponds to the effective number of parameters and acts as a
+penalty for model complexity. WAIC balances goodness of fit and model flexibility, with
+lower values indicating better expected predictive performance.
+
+### 5.3 Posterior Predictive Check (PPC)
+
+```{r}
+likelihood <- as.matrix(samples_like)
+
+ppc_stat <- rowSums(likelihood)
+obs_stat <- sum(y)
+
+hist(ppc_stat,
+     breaks = 30,
+     main = "Posterior Predictive Check",
+     xlab = "Replicated Statistic")
+
+abline(v = obs_stat, lwd = 2, lty = 2)
+```
+
+Posterior predictive checks assess whether the model is capable of reproducing key
+features of the observed data. Replicated datasets are generated from the posterior
+distribution and compared to the observed statistic. When the observed statistic falls
+within the distribution of replicated values, the model is considered to provide an
+adequate fit.
+
+## 6. Posterior Inference
+
+Posterior inference focuses on summarizing and interpreting the estimated posterior
+distributions of the regression coefficients, including measures of central tendency
+and uncertainty.
+
+```{r}
+summary(samples)
+```
+
+Posterior summaries include posterior means and 95% credible intervals. A credible
+interval represents the range within which the parameter lies with 95% posterior
+probability, given the observed data and prior assumptions.
+
+### 6.1 Credible Intervals
+
+The forest plot visualizes posterior means and 95% credible intervals for each regression
+coefficient. The vertical dashed line at zero represents no effect. Predictors whose
+credible intervals do not cross zero exhibit stronger posterior evidence of association
+with heart disease risk.
+
+```{r}
+post <- as.matrix(samples)
+
+post_summary <- cbind(
+  mean  = colMeans(post),
+  lower = apply(post, 2, quantile, 0.025),
+  upper = apply(post, 2, quantile, 0.975)
+)
+
+post_summary <- post_summary[c("beta0","beta1","beta2","beta3"), ]
+
+par(mar = c(5,8,2,2))
+
+plot(post_summary[, "mean"],
+     1:4,
+     xlim = range(post_summary[, c("lower","upper")]),
+     yaxt = "n",
+     xlab = "Posterior Estimate",
+     ylab = "",
+     pch = 19)
+
+arrows(post_summary[, "lower"], 1:4,
+       post_summary[, "upper"], 1:4,
+       angle = 90, code = 3, length = 0.05)
+
+abline(v = 0, lty = 2)
+
+axis(2, at = 1:4,
+     labels = c("Intercept", "Age", "Cholesterol", "Max Heart Rate"),
+     las = 1)
+```
+
+### 6.2 Posterior Interpretation
+
+Each regression coefficient is interpreted probabilistically. A coefficient whose 95% credible interval does not include zero is considered to have strong evidence of association with the response variable.
+
+## 7. Prediction Performance
+
+```{r}
+XX <- cbind(1, x1, x2, x3)
+
+beta_hat <- summary(samples)$statistics[,1]
+
+pred_prob <- 1 / (1 + exp(-XX %*% beta_hat))
+pred <- ifelse(pred_prob > 0.5, 1, 0)
+
+confusionMatrix(factor(pred), factor(y))
+```
+
+The model achieved an overall classification accuracy of approximately 69%. This moderate
+predictive performance is reasonable given the limited number of predictors and the
+complex nature of heart disease outcomes. The primary objective of the analysis is
+probabilistic inference and uncertainty quantification rather than maximizing predictive
+accuracy.
